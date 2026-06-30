@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>16th Street Mall - Rat Bait Station Tracker</title>
+<style>
+  :root{
+    --activity:#d9362b;
+    --noactivity:#3a7d44;
+    --missing:#9b9b9b;
+    --bg:#f7f6f3;
+    --card:#ffffff;
+    --ink:#222222;
+    --muted:#6b6b6b;
+    --border:#e1ded6;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    padding:24px;
+  }
+  h1{font-size:22px;margin:0 0 4px 0;}
+  .subtitle{color:var(--muted);font-size:14px;margin-bottom:20px;}
+  .layout{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap;}
+  .map-col{flex:1 1 620px;min-width:320px;}
+  .side-col{flex:0 0 300px;min-width:260px;}
+  .legend{display:flex;gap:18px;margin-bottom:18px;flex-wrap:wrap;font-size:13px;}
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .dot{width:14px;height:14px;border-radius:50%;display:inline-block;border:1px solid rgba(0,0,0,.15);}
+  .month-select{margin-bottom:16px;font-size:13px;}
+  .month-select select{padding:6px 10px;border-radius:6px;border:1px solid var(--border);font-size:13px;}
+  .street{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:14px 16px;
+    margin-bottom:10px;
+  }
+  .street-label{font-size:12px;font-weight:600;color:var(--muted);margin-bottom:10px;letter-spacing:.3px;text-transform:uppercase;}
+  .markers{display:flex;gap:14px;flex-wrap:wrap;align-items:center;}
+  .marker{
+    width:38px;height:38px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    color:#fff;font-size:12px;font-weight:700;cursor:pointer;
+    border:2px solid rgba(0,0,0,.12);
+    transition:transform .12s ease;
+  }
+  .marker:hover{transform:scale(1.12);}
+  .marker.selected{outline:3px solid #2a5db0;outline-offset:2px;}
+  .panel{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:18px;
+    position:sticky;
+    top:24px;
+  }
+  .panel h2{font-size:16px;margin:0 0 4px 0;}
+  .panel .block-tag{color:var(--muted);font-size:12px;margin-bottom:14px;}
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  th,td{text-align:left;padding:6px 4px;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:600;}
+  .status-pill{
+    display:inline-block;padding:2px 9px;border-radius:20px;color:#fff;font-size:12px;font-weight:600;
+  }
+  .summary{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:16px 18px;
+    margin-bottom:18px;
+    font-size:13px;
+  }
+  .summary-row{display:flex;justify-content:space-between;padding:4px 0;}
+  .placeholder{color:var(--muted);font-size:13px;}
+  .note{font-size:12px;color:var(--muted);margin-top:14px;line-height:1.5;}
+</style>
+</head>
+<body>
+
+<h1>16th Street Mall &mdash; Rat Bait Station Tracker</h1>
+<div class="subtitle">Tree well stations only (24 of 232 wells are monitored). Click a station to see its history.</div>
+
+<div class="layout">
+  <div class="map-col">
+
+    <div class="legend">
+      <span><i class="dot" style="background:var(--activity)"></i> Activity found</span>
+      <span><i class="dot" style="background:var(--noactivity)"></i> No activity</span>
+      <span><i class="dot" style="background:var(--missing)"></i> Station missing</span>
+    </div>
+
+    <div class="month-select">
+      View month:
+      <select id="monthPicker" onchange="renderMap()"></select>
+    </div>
+
+    <div id="streets"></div>
+  </div>
+
+  <div class="side-col">
+    <div class="summary" id="summaryBox"></div>
+    <div class="panel" id="detailPanel">
+      <h2>Select a station</h2>
+      <div class="placeholder">Click any colored marker to see its tree well number, location, and month-over-month results.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================================================================
+   DATA TO UPDATE EACH MONTH
+   - Add the new month name to MONTHS (in order).
+   - For each tree, add a new month: status entry to its "history" object.
+   - Status codes: 1 = activity, 0 = no activity, "x" = station missing
+   ========================================================================= */
+
+const MONTHS = ["June 2026", "July 2026", "August 2026", "September 2026", "October 2026"];
+
+// Cross streets in order, defining the 13 block segments
+const STREETS = [
+  "Market", "Larimer", "Lawrence", "Arapahoe", "Curtis", "Champa",
+  "Stout", "California", "Welton", "Glenarm", "Tremont", "Court", "Cleveland"
+];
+
+// Tracked tree wells, grouped by block (block 1 = Market-Larimer, etc.)
+// Position within block is left-to-right order along the mall.
+const treeData = {
+  1:   { block: 1,  history: { "June 2026": 0 } },
+  24:  { block: 2,  history: { "June 2026": 1 } },
+  25:  { block: 2,  history: { "June 2026": 0 } },
+  50:  { block: 3,  history: { "June 2026": 1 } },
+  51:  { block: 3,  history: { "June 2026": "x" } },
+  74:  { block: 4,  history: { "June 2026": "x" } },
+  77:  { block: 4,  history: { "June 2026": "x" } },
+  88:  { block: 5,  history: { "June 2026": "x" } },
+  91:  { block: 5,  history: { "June 2026": "x" } },
+  104: { block: 6,  history: { "June 2026": "x" } },
+  107: { block: 6,  history: { "June 2026": "x" } },
+  120: { block: 7,  history: { "June 2026": "x" } },
+  122: { block: 7,  history: { "June 2026": 0 } },
+  131: { block: 8,  history: { "June 2026": 0 } },
+  137: { block: 8,  history: { "June 2026": 0 } },
+  149: { block: 9,  history: { "June 2026": "x" } },
+  152: { block: 9,  history: { "June 2026": 0 } },
+  164: { block: 10, history: { "June 2026": 0 } },
+  167: { block: 10, history: { "June 2026": 0 } },
+  179: { block: 11, history: { "June 2026": 0 } },
+  183: { block: 11, history: { "June 2026": 0 } },
+  206: { block: 12, history: { "June 2026": "x" } },
+  207: { block: 12, history: { "June 2026": "x" } },
+  227: { block: 13, history: { "June 2026": "x" } }
+};
+
+/* ========================================================================= */
+
+const COLORS = { 1: "var(--activity)", 0: "var(--noactivity)", "x": "var(--missing)" };
+const LABELS = { 1: "Activity", 0: "No activity", "x": "Missing station" };
+
+let selectedTree = null;
+
+function populateMonthPicker(){
+  const sel = document.getElementById('monthPicker');
+  sel.innerHTML = MONTHS.map(m => `<option value="${m}">${m}</option>`).join('');
+
+  // Default to the most recent month that has at least one data point
+  const monthsWithData = MONTHS.filter(m =>
+    Object.values(treeData).some(t => t.history.hasOwnProperty(m))
+  );
+  sel.value = monthsWithData.length ? monthsWithData[monthsWithData.length - 1] : MONTHS[0];
+}
+
+function statusFor(treeNum, month){
+  const h = treeData[treeNum].history;
+  return h.hasOwnProperty(month) ? h[month] : null; // null = no data yet
+}
+
+function renderMap(){
+  const month = document.getElementById('monthPicker').value;
+  const container = document.getElementById('streets');
+  container.innerHTML = '';
+
+  for(let b = 1; b <= STREETS.length; b++){
+    const trees = Object.keys(treeData).filter(t => treeData[t].block === b);
+    if(trees.length === 0) continue;
+    const fromSt = STREETS[b-1];
+    const toSt = STREETS[b] || "end of mall";
+
+    const block = document.createElement('div');
+    block.className = 'street';
+    const label = document.createElement('div');
+    label.className = 'street-label';
+    label.textContent = `Block ${b} — ${fromSt} to ${toSt}`;
+    block.appendChild(label);
+
+    const markers = document.createElement('div');
+    markers.className = 'markers';
+    trees.forEach(t => {
+      const status = statusFor(t, month);
+      const m = document.createElement('div');
+      m.className = 'marker' + (selectedTree === t ? ' selected' : '');
+      m.style.background = status === null ? '#cfcfcf' : COLORS[status];
+      m.textContent = t;
+      m.title = `Tree well ${t}`;
+      m.onclick = () => { selectedTree = t; renderMap(); showDetail(t); };
+      markers.appendChild(m);
+    });
+    block.appendChild(markers);
+    container.appendChild(block);
+  }
+
+  renderSummary(month);
+}
+
+function renderSummary(month){
+  let a=0,n=0,x=0,pending=0;
+  Object.keys(treeData).forEach(t=>{
+    const s = statusFor(t, month);
+    if(s === 1) a++; else if(s === 0) n++; else if(s === 'x') x++; else pending++;
+  });
+  document.getElementById('summaryBox').innerHTML = `
+    <div style="font-weight:600;margin-bottom:8px;">${month} summary</div>
+    <div class="summary-row"><span>Activity found</span><span>${a}</span></div>
+    <div class="summary-row"><span>No activity</span><span>${n}</span></div>
+    <div class="summary-row"><span>Missing stations</span><span>${x}</span></div>
+    ${pending ? `<div class="summary-row" style="color:var(--muted)"><span>No data yet</span><span>${pending}</span></div>` : ''}
+    <div class="summary-row" style="border-top:1px solid var(--border);margin-top:6px;padding-top:8px;font-weight:600;">
+      <span>Total tracked</span><span>${Object.keys(treeData).length}</span>
+    </div>
+  `;
+}
+
+function showDetail(t){
+  const data = treeData[t];
+  const panel = document.getElementById('detailPanel');
+  const rows = MONTHS.map(m => {
+    const s = data.history.hasOwnProperty(m) ? data.history[m] : null;
+    const pill = s === null
+      ? `<span class="status-pill" style="background:#cfcfcf;">No data</span>`
+      : `<span class="status-pill" style="background:${COLORS[s]};">${LABELS[s]}</span>`;
+    return `<tr><td>${m}</td><td>${pill}</td></tr>`;
+  }).join('');
+
+  panel.innerHTML = `
+    <h2>Tree Well #${t}</h2>
+    <div class="block-tag">Block ${data.block}</div>
+    <table>
+      <thead><tr><th>Month</th><th>Result</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="note">Reference the "Tree Rollplot" PDF and search for tree well #${t} to confirm the exact station location on site.</div>
+  `;
+}
+
+populateMonthPicker();
+renderMap();
+</script>
+</body>
+</html>

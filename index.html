@@ -165,7 +165,12 @@ let selectedTree = null;
 function populateMonthPicker(){
   const sel = document.getElementById('monthPicker');
   sel.innerHTML = MONTHS.map(m => `<option value="${m}">${m}</option>`).join('');
-  sel.value = MONTHS[MONTHS.length - 1];
+
+  // Default to the most recent month that has at least one data point
+  const monthsWithData = MONTHS.filter(m =>
+    Object.values(treeData).some(t => t.history.hasOwnProperty(m))
+  );
+  sel.value = monthsWithData.length ? monthsWithData[monthsWithData.length - 1] : MONTHS[0];
 }
 
 function statusFor(treeNum, month){
